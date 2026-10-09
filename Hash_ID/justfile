@@ -20,6 +20,10 @@ set export
 set shell := ["bash", "-uc"]
 # No Windows, recorre ao PowerShell de forma não interativa.
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+# Receitas marcadas com `[script]` serão executadas pelo Python do ambiente
+# gerenciado pelo uv. Isso é multiplataforma e evita a dependência de `cygpath`
+# que receitas com shebang Bash possuem no Windows.
+set script-interpreter := ["uv", "run", "python"]
 # Torna os argumentos da receita disponíveis para scripts shebang como `$1`, `$2`,
 # `$@` e `$#`. Sem isso, receitas shebang só veriam argumentos via substituição
 # textual `{{args}}`, o que é inseguro para entradas que contêm `$` (o texto
@@ -120,29 +124,25 @@ fix:
 [group('run')]
 [no-exit-message]
 [positional-arguments]
+[script]
 run *args:
-    #!/usr/bin/env bash
-    # Se nenhum argumento for fornecido, imprime um bloco de uso amigável e sai
-    # de forma limpa. Sem isso, `just run` (sem args) invocaria `uv run hashid`
-    # com nada, o argparse sairia com erro 2 e o just adicionaria uma mensagem de falha.
-    if [ $# -eq 0 ]; then
-        cat <<'EOF'
-    Uso: just run -- <hash>
+    import subprocess
+    import sys
 
-    Exemplos:
-      just run -- 5f4dcc3b5aa765d61d8327deb882cf99
-      just run -- '$2b$12$abcdefghijklmnopqrstuv'
+    arguments = sys.argv[1:]
+    if not arguments:
+        print("Uso: just run -- <hash>")
+        print("Exemplo: just run -- 5f4dcc3b5aa765d61d8327deb882cf99")
+        print("Ajuda:   just run -- --help")
+        raise SystemExit(0)
 
-    Ver todas as opções:
-      just run -- --help
-    EOF
-        exit 0
-    fi
-    # Encaminha os argumentos via "$@" — NÃO via {{args}}. Por que: {{args}} é uma
-    # substituição TEXTUAL feita pelo just antes do bash rodar o script, então
-    # um hash como $2b$12$abc teria seus $2b e $12 expandidos como variáveis
-    # do bash e chegaria corrompido ao hashid. "$@" entrega ao bash o argv original.
-    uv run hashid "$@"
+    # A lista preserva cada argumento sem reinterpretação pelo Bash ou PowerShell.
+    # Assim, hashes que começam com `$` não são expandidos como variáveis.
+    completed = subprocess.run(
+        ["uv", "run", "hashid", *arguments],
+        check=False,
+    )
+    raise SystemExit(completed.returncode)
 
 
 # =============================================================================
